@@ -1,0 +1,171 @@
+---
+title: "403-Final-Project"
+author: "Chris Chen"
+date: "5/24/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preliminaries
+
+```{r}
+library(lmtest)
+library(ggplot2)
+```
+
+
+## Data genetation
+
+```{r}
+set.seed(340)
+pp = c(0.1, 0.5, 0.4)
+np = rmultinom(1, 1000, pp)
+s = c(1, 2, 2)
+m = c(2, 3, 7)
+k = c(30, 30, 20)
+y1 = s[1] * rt(np[1], k[1]) + m[1]
+y2 = s[2] * rt(np[2], k[2]) + m[2]
+y3 = s[3] * rt(np[3], k[3]) + m[3]
+yy = abs(c(y1, y2, y3))
+den_pos_y1 = (dt((y1 - m[1]) / s[1], k[1]) + dt((- y1 - m[1]) / s[1], k[1])) / s[1]
+den_pos_y2 = (dt((y2 - m[2]) / s[2], k[2]) + dt((- y2 - m[2]) / s[2], k[2])) / s[2]
+den_pos_y3 = (dt((y3 - m[3]) / s[3], k[3]) + dt((- y3 - m[3]) / s[3], k[3])) / s[3]
+den = c(den_pos_y1, den_pos_y2, den_pos_y3)
+```
+
+```{r}
+y_base = seq(0, 15, length.out = 5000)
+combined_t = pp[1] * dt((y_base - m[1]) / s[1], k[1]) + pp[2] * dt((y_base - m[2]) / s[2], k[2]) + pp[3] * dt((y_base - m[3]) / s[3], k[3])
+hist(yy, probability = T, breaks = 25, xlab = "C",
+     main = "Histogram with density curve of number of micro-moles")
+lines(y_base, 0.6 * combined_t, lwd = 1, col = "red")
+```
+
+```{r}
+df_plot = data.frame(conc = yy, density = den, label = c(rep(1, np[1]), rep(2, np[2]), rep(3, np[3])))
+df_plot = df_plot[order(df_plot$conc), ]
+plot(df_plot[df_plot$label == 1, ]$conc, df_plot[df_plot$label == 1, ]$density, type = "l", col = alpha("orange", 0.8), xlim = c(0, 14), xlab = "C", ylab = "density")
+lines(df_plot[df_plot$label == 2, ]$conc, df_plot[df_plot$label == 2, ]$density, type = "l", col = alpha("blue", 0.8))
+lines(df_plot[df_plot$label == 3, ]$conc, df_plot[df_plot$label == 3, ]$density, type = "l", col = alpha("green", 0.8))
+legend("topright", c("with only drug P", "without other drugs", "with only drug A"), col = c("orange", "blue", "green"), cex = 0.8, pch = c(1, 1, 1))
+```
+
+```{r}
+set.seed(403)
+b1 = -0.5
+b0 = mean(yy) - 128 * (-0.5)
+s2 = c(0.75, 0.75, 1.5)
+k2 = 10
+e = pp[1] * s2[1] * rt(1000, df = k2) + pp[2] * s2[2] * rt(1000, df = k2) + pp[3] * s2[3] * rt(1000, df = k2)
+xx = (yy - b0 - e) / b1
+df = data.frame(x = round(xx), class = c(rep(1, np[1]), rep(2, np[2]), rep(3, np[3])), y = yy)
+new_y1 = df[df$class == 1, ]
+new_y2 = df[df$class == 2, ]
+new_y3 = df[df$class == 3, ]
+plot(new_y1$x, new_y1$y, col = alpha("orange", 0.8), ylim = c(0, 14), xlim = c(108, 144),
+     xlab = "SBP", ylab = "C")
+points(new_y2$x, new_y2$y, col = alpha("blue", 0.8))
+points(new_y3$x, new_y3$y, col = alpha("green", 0.8))
+legend("topright", c("with only drug P", "without other drugs", "with only drug A"), col = c("orange", "blue", "green"), cex = 0.8, pch = c(1, 1, 1))
+hist(xx, breaks = 20, main = "", xlab = "SBP", ylab = "density")
+```
+
+```{r}
+lm1 = lm(y ~ x, data = df)
+summary(lm1)
+b1_samp = lm1$coefficients[2]
+b0_samp = lm1$coefficients[1]
+```
+
+
+## Empirical Bootstrap
+
+```{r}
+set.seed(666)
+B = 5000
+b0s = b1s = rep(0, B)
+for (i in 1:B) {
+  ind = sample(1000, 1000, replace = T)
+  ytmp = df[ind, ]$y
+  xtmp = df[ind, ]$x
+  b1s[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
+```{r}
+mean(b1s)
+mean(b0s)
+var(b1s)
+var(b0s)
+(mse1 = mean((b1s - b1_samp) ^ 2))
+(mse0 = mean((b0s - b0_samp) ^ 2))
+```
+
+```{r}
+dwtest(lm1, alternative = "two.sided")
+plot(lm1, which = 2)
+plot(lm1, which = 4)
+```
+
+
+## Residual Bootstrap
+
+```{r}
+set.seed(123)
+res = lm1$residuals
+b0s = b1s = rep(0, B)
+for (i in 1:B) {
+  ind = sample(1000, 1000, replace = T)
+  res_tmp = res[ind]
+  xtmp = df$x
+  ytmp = b0_samp + b1_samp * xtmp + res_tmp
+  b1s[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
+```{r}
+mean(b1s)
+mean(b0s)
+var(b1s)
+var(b0s)
+(mse1 = mean((b1s - b1_samp) ^ 2))
+(mse0 = mean((b0s - b0_samp) ^ 2))
+```
+
+```{r}
+plot(lm1, which = 1)
+set1 = lm1$residuals[which(lm1$fitted.values < 4)]
+set2 = lm1$residuals[which(lm1$fitted.values >= 4)]
+var.test(set1, set2)
+```
+
+
+## Wild Bootstrap
+
+```{r}
+set.seed(516)
+for (i in 1:B) {
+  v = rnorm(1000)
+  xtmp = df$x
+  res_samp = lm1$residuals
+  ytmp = b0_samp + b1_samp * xtmp + res_samp * v
+  b1s[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
+```{r}
+mean(b1s)
+mean(b0s)
+var(b1s)
+var(b0s)
+(mse1 = mean((b1s - b1_samp) ^ 2))
+(mse0 = mean((b0s - b0_samp) ^ 2))
+```
+

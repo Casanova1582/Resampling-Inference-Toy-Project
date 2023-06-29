@@ -1,0 +1,189 @@
+---
+title: "403-test"
+author: "Chris Chen"
+date: "5/26/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preliminaries
+
+```{r}
+library(lmtest)
+library(ggplot2)
+library(mvtnorm)
+```
+
+
+## Data Generation
+
+### C
+
+```{r}
+s = c(1, 2, 2)
+m = c(2, 3, 7)
+k = c(30, 30, 20)
+y1 = s[1] * rt(np[1], k[1]) + m[1]
+y2 = s[2] * rt(np[2], k[2]) + m[2]
+y3 = s[3] * rt(np[3], k[3]) + m[3]
+yy = abs(c(y1, y2, y3))
+den_pos_y1 = (dt((y1 - m[1]) / s[1], k[1]) + dt((- y1 - m[1]) / s[1], k[1])) / s[1]
+den_pos_y2 = (dt((y2 - m[2]) / s[2], k[2]) + dt((- y2 - m[2]) / s[2], k[2])) / s[2]
+den_pos_y3 = (dt((y3 - m[3]) / s[3], k[3]) + dt((- y3 - m[3]) / s[3], k[3])) / s[3]
+den = c(den_pos_y1, den_pos_y2, den_pos_y3)
+```
+
+### SBP
+
+```{r}
+set.seed(425)
+pp = c(0.1, 0.5, 0.4)
+np = rmultinom(1, 1000, pp)
+covmat1 = matrix(c(1, -0.5, -0.5, 20), ncol = 2, byrow = T)
+obs_c1 = rmvnorm(np[1], mean = c(2.5, 150), sigma = covmat1)
+x1 = round(obs_c1[, 2])
+y1 = abs(obs_c1[, 1])
+
+covmat2 = matrix(c(2, -0.5, -0.5, 20), ncol = 2, byrow = T)
+obs_c2 = rmvnorm(np[2], mean = c(5, 140), sigma = covmat2)
+x2 = round(obs_c2[, 2])
+y2 = abs(obs_c2[, 1])
+
+covmat3 = matrix(c(10, -0.5, -0.5, 40), ncol = 2, byrow = T)
+obs_c3 = rmvnorm(np[3], mean = c(10, 130), sigma = covmat3)
+x3 = round(obs_c3[, 2])
+y3 = abs(obs_c3[, 1])
+
+SBP = c(x1, x2, x3)
+C = c(y1, y2, y3)
+```
+
+
+### Plot
+
+```{r}
+plot(x1, y1, xlim = c(110, 160), ylim = c(0, 20))
+points(x2, y2, col = "red")
+points(x3, y3, col = "blue")
+```
+
+### lms 
+
+```{r}
+lm1 = lm(y1 ~ x1)
+summary(lm1)
+lm2 = lm(y2 ~ x2)
+summary(lm2)
+lm3 = lm(y3 ~ x3)
+summary(lm3)
+lmt = lm(C ~ SBP)
+summary(lmt)
+```
+
+
+### Residual Analysis
+
+```{r}
+dwtest(lmt, alternative = "two.sided")
+plot(lmt, which = 2)
+plot(lmt, which = 4)
+
+plot(lmt, which = 1)
+set1 = lmt$residuals[which(lmt$fitted.values < 6)]
+set2 = lmt$residuals[which(lmt$fitted.values >= 6)]
+var.test(set1, set2)
+```
+
+## Bootstrap
+
+```{r}
+set.seed(599)
+B = 10000
+bs = rep(0, B)
+for (b in 1:B) {
+  ind = sample(np[1], np[1], replace = T)
+  X_bt = x1[ind]
+  Y_bt = y1[ind]
+  bs[b] = lm(Y_bt ~ X_bt)$coefficients[2]
+}
+mean(bs >= lm1$coefficients[2])
+```
+
+```{r}
+set.seed(599)
+B = 10000
+bs = rep(0, B)
+for (b in 1:B) {
+  ind = sample(np[2], np[2], replace = T)
+  X_bt = x2[ind]
+  Y_bt = y2[ind]
+  bs[b] = lm(Y_bt ~ X_bt)$coefficients[2]
+}
+mean(bs >= lm2$coefficients[2])
+```
+
+```{r}
+set.seed(599)
+B = 10000
+bs = rep(0, B)
+for (b in 1:B) {
+  ind = sample(np[3], np[3], replace = T)
+  X_bt = x3[ind]
+  Y_bt = y3[ind]
+  bs[b] = lm(Y_bt ~ X_bt)$coefficients[2]
+}
+mean(bs >= lm3$coefficients[2])
+```
+
+### For empirical bootstrap boxplot
+
+```{r}
+set.seed(666)
+B = 5000
+b0s_e = b1s_e = rep(0, B)
+for (i in 1:B) {
+  ind = sample(1000, 1000, replace = T)
+  ytmp = C[ind]
+  xtmp = SBP[ind]
+  b1s_e[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s_e[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
+### For residual bootstrap boxplot
+
+```{r}
+b0_samp = lmt$coefficients[1]
+b1_samp = lmt$coefficients[2]
+set.seed(123)
+res = lmt$residuals
+b0s_r = b1s_r = rep(0, B)
+for (i in 1:B) {
+  ind = sample(1000, 1000, replace = T)
+  res_tmp = res[ind]
+  xtmp = SBP
+  ytmp = b0_samp + b1_samp * xtmp + res_tmp
+  b1s_r[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s_r[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
+### For wild bootstrap boxplot
+
+```{r}
+b0s_w = b1s_w = rep(0, B)
+set.seed(516)
+for (i in 1:B) {
+  v = rnorm(1000)
+  xtmp = SBP
+  res_samp = lmt$residuals
+  ytmp = b0_samp + b1_samp * xtmp + res_samp * v
+  b1s_w[i] = lm(ytmp ~ xtmp)$coefficients[2]
+  b0s_w[i] = lm(ytmp ~ xtmp)$coefficients[1]
+}
+```
+
